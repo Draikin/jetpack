@@ -454,31 +454,26 @@ class Jetpack_Photon {
 
 				$photon_args = array();
 
-				$image_meta = array();
-				// `full` is a special case in WP
-				// To ensure filter receives consistent data regardless of requested size, `$image_args` is overridden with dimensions of original image.
+				$image_meta = image_get_intermediate_size( $attachment_id, $size );
+
+				// 'full' is a special case: We need consistent data regardless of the requested size.
 				if ( 'full' == $size ) {
 					$image_meta = wp_get_attachment_metadata( $attachment_id );
-				}
-				// When a size is set with only a height or width, e.g. (`set_post_thumbnail_size( 1200, 0, true );`), we need an image size for Photon to pass along later.
-				elseif ( 'post-thumbnail' == $size || ! $image_args['width'] || ! $image_args['height'] ) {
-					$image_meta = image_get_intermediate_size( $attachment_id, $size );
-
-					// The post thumbnail is unable to get the intermediate size, likely because it's smaller than the size of the post thumbnail.
-					// Let's get the full-size image so we're not distorting it later.
-					if ( 'post-thumbnail' == $size && ! $image_meta ) {
-						$image_meta = wp_get_attachment_metadata( $attachment_id );
+				} elseif ( ! $image_meta ) {
+					// If we still don't have any image meta at this point, it's probably from a custom thumbnail size
+					// for an image that was uploaded before the custom image was added to the theme.  Try to determine the size manually.
+					$image_meta = wp_get_attachment_metadata( $attachment_id );
+					$image_resized = image_resize_dimensions( $image_meta['width'], $image_meta['height'], $image_args['width'], $image_args['height'], $image_args['crop'] );
+					if ( $image_resized ) { // This could be false when the requested image size is larger than the full-size image.
+						$image_meta['width'] = $image_resized[6];
+						$image_meta['height'] = $image_resized[7];
 					}
 				}
 
-				if ( isset( $image_meta['width'], $image_meta['height'] ) ) {
-					// 'crop' is true so Photon's `resize` method is used
-					$image_args = array(
-						'width'  => $image_meta['width'],
-						'height' => $image_meta['height'],
-						'crop'   => true
-					);
-				}
+				$image_args['width']  = $image_meta['width'];
+				$image_args['height'] = $image_meta['height'];
+
+				list( $image_args['width'], $image_args['height'] ) = image_constrain_size_for_editor( $image_args['width'], $image_args['height'], $size, 'display' );
 
 				// Expose determined arguments to a filter before passing to Photon
 				$transform = $image_args['crop'] ? 'resize' : 'fit';
@@ -502,6 +497,7 @@ class Jetpack_Photon {
 					}
 
 				}
+
 
 				/**
 				 * Filter the Photon Arguments added to an image when going through Photon, when that image size is a string.
@@ -537,8 +533,16 @@ class Jetpack_Photon {
 				$height = isset( $size[1] ) ? (int) $size[1] : false;
 
 				// Don't bother if necessary parameters aren't passed.
-				if ( ! $width || ! $height )
+				if ( ! $width || ! $height ) {
 					return $image;
+				}
+
+				$image_meta = wp_get_attachment_metadata( $attachment_id );
+				$image_resized = image_resize_dimensions( $image_meta['width'], $image_meta['height'], $width, $height );
+				$width = $image_resized[6];
+				$height = $image_resized[7];
+
+				list( $width, $height ) = image_constrain_size_for_editor( $width, $height, $size );
 
 				// Expose arguments to a filter before passing to Photon
 				$photon_args = array(
